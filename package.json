@@ -1,0 +1,38 @@
+{
+  "name": "leadbot",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm build:widget && cp apps/widget/dist/leadbot.js apps/web/public/widget/ 2>/dev/null || true && pnpm dev:web",
+    "dev:web": "cd apps/web && pnpm dev",
+    "dev:widget": "pnpm --filter widget dev",
+    "build": "pnpm db:generate && pnpm build:widget && cp apps/widget/dist/leadbot.js apps/web/public/widget/ 2>/dev/null || true && pnpm --filter shared build && pnpm --filter web build",
+    "build:widget": "pnpm --filter widget build",
+    "build:full": "pnpm build:widget && cp apps/widget/dist/leadbot.js apps/web/public/widget/ && pnpm --filter shared build && pnpm --filter web build",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "start": "pnpm db:migrate:deploy && pnpm --filter web start",
+    "postinstall": "prisma generate"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.9.1",
+    "bcryptjs": "^2.4.3",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "packageManager": "pnpm@9.14.2",
+  "engines": {
+    "node": ">=18"
+  }
+}

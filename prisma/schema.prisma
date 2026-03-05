@@ -1,0 +1,256 @@
+// LeadBot - Prisma Schema
+// Multi-tenant, GDPR-ready
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SessionStatus {
+  OPEN
+  QUALIFIED
+  NOT_QUALIFIED
+}
+
+enum MessageRole {
+  VISITOR
+  BOT
+  SYSTEM
+}
+
+enum CrmProvider {
+  NONE
+  WEBHOOK
+  HUBSPOT
+}
+
+enum WorkflowTrigger {
+  LEAD_QUALIFIED   // qualified via chat
+  LEAD_CAPTURED    // offline form capture
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  users          User[]
+  sites          Site[]
+  crmConnections CrmConnection[]
+  workflows      Workflow[]
+  auditLogs      AuditLog[]
+}
+
+model Workflow {
+  id        String          @id @default(cuid())
+  tenantId  String
+  name      String          // e.g. "Notify Slack when lead qualified"
+  trigger   WorkflowTrigger
+  enabled   Boolean         @default(true)
+  actions   Json            // [{ type: "webhook", webhookUrl: "..." }, { type: "hubspot" }]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, trigger])
+}
+
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String
+  email        String
+  passwordHash String?
+  role         String    @default("member") // owner | member
+  createdAt    DateTime  @default(now())
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  auditLog  AuditLog[] @relation("ActorUser")
+  leadNotes LeadNote[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+model Site {
+  id        String   @id @default(cuid())
+  tenantId  String
+  domain    String
+  createdAt DateTime @default(now())
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  widgetConfig    WidgetConfig?
+  chatSessions    ChatSession[]
+  leads           Lead[]
+  knowledgeChunks KnowledgeChunk[]
+  pageViews       PageView[]
+
+  @@unique([tenantId, domain])
+  @@index([tenantId])
+}
+
+model PageView {
+  id        String   @id @default(cuid())
+  siteId    String
+  visitorId String   // same as chat visitorId – one visitor across pages = one visitorId
+  path      String   // pathname (e.g. /landing) to avoid storing full URL
+  referrer  String?  // referrer domain or path
+  createdAt DateTime @default(now())
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@index([siteId, createdAt])
+  @@index([siteId, visitorId])
+}
+
+model WidgetConfig {
+  id                    String   @id @default(cuid())
+  siteId                String   @unique
+  botName               String   @default("LeadBot")
+  avatarUrl             String?  // logo/avatar image URL
+  avatarEmoji            String?  // fallback: single emoji or character when no image (e.g. "🤖" or "💬")
+  primaryColor          String   @default("#2563eb")
+  greetingText          String   @default("Hi! How can I help you today?")
+  offlineMessage        String   @default("We're currently offline. Leave your details and we'll get back to you.")
+  qualificationQuestions Json    @default("[]") // array of { id, question, required }
+  leadThreshold         Int      @default(60)
+  businessHoursStart     Int?     // 0-23 (e.g. 8 = 08:00)
+  businessHoursEnd      Int?     // 0-23 (e.g. 16 = 16:00)
+  collectEmailPhoneFirst Boolean @default(true)
+  toneOfVoice            String?  @db.Text // e.g. "Professional but warm, use we/you, no jargon"
+  inputPlaceholder       String?  // e.g. "Type a message..." or "Skriv en besked..."
+  typingText             String?  // e.g. "Typing..." or "Skriver..."
+  sendButtonLabel        String?  // e.g. "Send"
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+}
+
+model CrmConnection {
+  id                 String       @id @default(cuid())
+  tenantId           String
+  provider           CrmProvider  // WEBHOOK or HUBSPOT
+  webhookUrl         String?
+  hubspotAccessToken String?
+  hubspotRefreshToken String?
+  expiresAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+  @@index([tenantId])
+}
+
+model ChatSession {
+  id        String        @id @default(cuid())
+  siteId    String
+  visitorId String        // anonymous id from widget (cookie/localStorage)
+  startedAt DateTime     @default(now())
+  endedAt   DateTime?
+  pageUrl   String?
+  referrer  String?
+  utm       Json?         // { source, medium, campaign, term, content }
+  userAgent String?
+  ipHash    String?
+  status    SessionStatus @default(OPEN)
+  score     Int           @default(0)
+  summary   String?
+  qualificationState Json? // { intent, urgency, budgetSignal, ... }
+
+  site    Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+  lead    Lead?
+
+  @@index([siteId])
+  @@index([visitorId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  role      MessageRole
+  content   String
+  createdAt DateTime    @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+model KnowledgeChunk {
+  id        String   @id @default(cuid())
+  siteId    String
+  source    String   // "url" | "text"
+  content   String   @db.Text
+  metadata  Json?    // url, title, etc.
+  embedding Json?    // RAG: vector from OpenAI embedding (array of numbers)
+  createdAt DateTime @default(now())
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+}
+
+model Lead {
+  id             String       @id @default(cuid())
+  sessionId      String       @unique
+  siteId         String
+  name           String?
+  email          String?
+  phone          String?
+  company        String?
+  notes          String?
+  score          Int
+  qualified      Boolean      @default(true)
+  pushedAt       DateTime?
+  crmProvider    CrmProvider  @default(NONE)
+  crmExternalId  String?
+  createdAt      DateTime     @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  site    Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  leadNotes LeadNote[]
+
+  @@index([siteId])
+  @@index([qualified])
+  @@index([createdAt])
+}
+
+model LeadNote {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String   // sales rep who wrote the note
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  actorUserId String?
+  action     String
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor  User?   @relation("ActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([createdAt])
+}
