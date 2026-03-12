@@ -1,6 +1,10 @@
 {
   "name": "leadbot",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "pnpm build:widget && cp apps/widget/dist/leadbot.js apps/web/public/widget/ 2>/dev/null || true && pnpm dev:web",
     "dev:web": "cd apps/web && pnpm dev",
